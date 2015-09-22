@@ -1,27 +1,118 @@
 #!/usr/bin/env perl
 
+=head1 NAME
+
+gearctl - Gearman daemon controller, with graceful shutdown
+
+=head1 SYNOPSIS
+
+ gearctl [options]
+
+ Options:
+
+      --host <arg>  the server's host (default localhost)
+      --port <arg>  the server's port (default 4730)
+      --workers     a list all workers
+      --status      a list of functions
+      --shutdown    shutdown the server without draining the queue
+      --graceful    drain queue before shutting down the server
+      --version     reports the server version
+  -h, --help        brief help message
+  -m, --man         full documentation
+
+=head1 OPTIONS
+
+=over
+
+=item --host <arg>
+
+Default: localhost
+
+Connect to the server on this host.
+
+=item --port <arg>
+
+Default: 4730
+
+Connect to the server on this port.
+
+=item --workers
+
+This sends back a list of all workers, their file descriptors, their IPs, their
+IDs, and a list of registered functions they can perform. The list is
+terminated with a line containing a single '.' (period). The format is:
+
+ FD IP-ADDRESS CLIENT-ID : FUNCTION ...
+
+=item --status
+
+This sends back a list of all registered functions.  Next to each function is
+the number of jobs in the queue, the number of running jobs, and the number of
+capable workers. The columns are tab separated, and the list is terminated with
+a line containing a single '.' (period). The format is:
+
+ FUNCTION\tTOTAL\tRUNNING\tAVAILABLE_WORKERS
+
+=item --shutdown
+
+Shutdown the server immediately.  Any jobs in non-durable queues will be lost.
+
+=item --graceful
+
+Shutdown the server after preventing further jobs from being added to the
+queue, and allowing remaining jobs to complete.  This can be useful if you want
+to fail jobs over to another server, but don't want to lose jobs that are
+already queued.
+
+=item --version
+
+Report the server's version.
+
+=item -h, --help
+
+Print a brief help message, then exit.
+
+=item -m, --man
+
+Print the manual page, and then exit.
+
+=back
+
+=head1 DESCRIPTION
+
+C<gearctl> is an alternative to C<gearadmin> - one which provides the option to
+gracefully shutdown a gearman server.
+
+=cut
+
 use strict;
 use warnings;
 
 use IO::Socket::INET;
 use Getopt::Long;
+use Pod::Usage;
 
 my %Args = (
-    host => '127.0.0.1',
+    host => 'localhost',
     port => 4730,
 );
 
 GetOptions(
     \%Args,
-    'host|h=s',
-    'port|p=i',
+    'host=s',
+    'port=i',
     'workers',
     'status',
     'maxqueue',
     'shutdown',
     'graceful',
     'version',
+    'help|h',
+    'man|m',
 );
+
+pod2usage(-verbose => 0), exit if $Args{help};
+pod2usage(-verbose => 2), exit if $Args{man};
 
 die "Please specify one command only\n"
     if keys %Args > 3;
@@ -29,7 +120,6 @@ die "Please specify one command only\n"
 my %Dispatch = (
     workers  => sub { send_dot_cmd('workers') },
     status   => sub { send_dot_cmd('status') },
-    maxqueue => sub { send_ok_cmd('maxqueue') },
     shutdown => sub {
         send_ok_cmd('shutdown');
         wait_until_dead();
@@ -102,10 +192,12 @@ sub send_cmd {
 }
 
 sub wait_until_dead {
-    my $end = time + 300;
-    local $| = 1;
+    my $timeout = 300;
+    my $end     = time + $timeout;
 
-    while (get_socket() && time < $end) {
+    while (get_socket()) {
+        die "gearmand failed to close after $timeout seconds\n"
+            if time > $end;
         sleep 1;
     }
 }
