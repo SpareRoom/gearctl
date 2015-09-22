@@ -1,0 +1,111 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use IO::Socket::INET;
+use Getopt::Long;
+
+my %Args = (
+    host => '127.0.0.1',
+    port => 4730,
+);
+
+GetOptions(
+    \%Args,
+    'host|h=s',
+    'port|p=i',
+    'workers',
+    'status',
+    'maxqueue',
+    'shutdown',
+    'graceful',
+    'version',
+);
+
+die "Please specify one command only\n"
+    if keys %Args > 3;
+
+my %Dispatch = (
+    workers  => sub { send_dot_cmd('workers') },
+    status   => sub { send_dot_cmd('status') },
+    maxqueue => sub { send_ok_cmd('maxqueue') },
+    shutdown => sub {
+        send_ok_cmd('shutdown');
+        wait_until_dead();
+    },
+    graceful => sub {
+        send_ok_cmd('shutdown graceful');
+        wait_until_dead();
+    },
+    version  => sub {
+        my ($version) = send_cmd(
+            'version',
+            qr{OK \d\.\d\.\d\x0a}
+        );
+        $version =~ s/^OK //;
+        print "$version\n";
+    },
+);
+
+for my $cmd (keys %Dispatch) {
+    next unless $Args{$cmd};
+    $Dispatch{$cmd}->();
+    last;
+}
+
+sub get_socket {
+    IO::Socket::INET->new(
+        PeerAddr => $Args{host},
+        PeerPort => $Args{port},
+        Type     => SOCK_STREAM,
+        Timeout  => 1,
+        Proto    => 'tcp',
+    );
+}
+
+sub send_ok_cmd {
+    my $cmd      = shift;
+    my ($status) = send_cmd($cmd, qr{OK\n\r});
+
+    die "'$cmd' returned non-OK status: $status\n"
+        unless defined $status && $status eq 'OK';
+}
+
+sub send_dot_cmd {
+    my $cmd = shift;
+    print join "\n", send_cmd($cmd, qr{\x0a\.\x0a});
+    print "\n";
+}
+
+sub send_cmd {
+    my $cmd  = shift;
+    my $term = shift;
+    my $sock = get_socket();
+
+    die "Could not connect to Gearman on $Args{host}:$Args{port}\n"
+        unless $sock;
+
+    $sock->send("$cmd\n");
+
+    my ($buf, $data);
+    while (1) {
+        last unless defined $sock->recv($buf, 1024);
+        last unless length $buf;
+        $data .= $buf;
+        last if $data =~ /$term$/s;
+    }
+
+    $sock->close;
+
+    map {s/\s+$//; $_} split /^/, $data;
+}
+
+sub wait_until_dead {
+    my $end = time + 300;
+    local $| = 1;
+
+    while (get_socket() && time < $end) {
+        sleep 1;
+    }
+}
