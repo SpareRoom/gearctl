@@ -113,35 +113,38 @@ GetOptions(
 
 pod2usage(-verbose => 0), exit if $Args{help};
 pod2usage(-verbose => 2), exit if $Args{man};
+process_args();
 
-die "Please specify one command only\n"
-    if keys %Args > 3;
+sub process_args {
+    die "Please specify one command only\n"
+        if keys %Args > 3;
 
-my %Dispatch = (
-    workers  => sub { send_dot_cmd('workers') },
-    status   => sub { send_dot_cmd('status') },
-    shutdown => sub {
-        send_ok_cmd('shutdown');
-        wait_until_dead();
-    },
-    graceful => sub {
-        send_ok_cmd('shutdown graceful');
-        wait_until_dead();
-    },
-    version  => sub {
-        my ($version) = send_cmd(
-            'version',
-            qr{OK \d\.\d\.\d\x0a}
-        );
-        $version =~ s/^OK //;
-        print "$version\n";
-    },
-);
+    my %dispatch = (
+        workers  => sub { send_dot_cmd('workers') },
+        status   => sub { send_dot_cmd('status') },
+        shutdown => sub {
+            send_ok_cmd('shutdown');
+            wait_until_dead();
+        },
+        graceful => sub {
+            send_ok_cmd('shutdown graceful');
+            wait_until_dead();
+        },
+        version  => sub {
+            my ($version) = send_cmd(
+                'version',
+                qr{OK \d\.\d\.\d\x0a}
+            );
+            $version =~ s/^OK //;
+            print "$version\n";
+        },
+    );
 
-for my $cmd (keys %Dispatch) {
-    next unless $Args{$cmd};
-    $Dispatch{$cmd}->();
-    last;
+    for my $cmd (keys %dispatch) {
+        next unless $Args{$cmd};
+        $dispatch{$cmd}->();
+        last;
+    }
 }
 
 sub get_socket {
