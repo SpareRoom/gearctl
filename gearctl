@@ -158,11 +158,8 @@ sub get_socket {
 }
 
 sub send_ok_cmd {
-    my $cmd      = shift;
-    my ($status) = send_cmd($cmd, qr{OK\n\r});
-
-    die "'$cmd' returned non-OK status: $status\n"
-        unless defined $status && $status eq 'OK';
+    my $cmd = shift;
+    send_cmd($cmd, qr{OK\n\r});
 }
 
 sub send_dot_cmd {
@@ -176,8 +173,10 @@ sub send_cmd {
     my $term = shift;
     my $sock = get_socket();
 
-    die "Could not connect to Gearman on $Args{host}:$Args{port}\n"
-        unless $sock;
+    if (!$sock) {
+        print "Could not connect to Gearman on $Args{host}:$Args{port}\n";
+        return;
+    }
 
     $sock->send("$cmd\n");
 
